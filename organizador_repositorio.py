@@ -47,6 +47,7 @@ class OrganizadorRepositorio:
         self.criar_botao_acao(actions_frame, "Remover arquivos PDF 'N_PRXXXXXXXXX'", self.remover_pr_pdfs)
         self.criar_botao_acao(actions_frame, "Remover pastas '01_docsRecebidosEmail_Wpp'", self.remover_pastas_docs_recebidos)
         self.criar_botao_acao(actions_frame, "Mover pareceres para pastas de lotes", self.mover_pareceres)
+        self.criar_botao_acao(actions_frame, "Remover todos arquivos .docx", self.remover_arquivos_docx)
         
         # Status bar
         self.status_var = tk.StringVar()
@@ -84,16 +85,17 @@ class OrganizadorRepositorio:
         self.root.update_idletasks()
     
     def remover_sei_pdfs(self):
-        """Remove arquivos PDF que seguem o padrão 'SEI_XXXXX'"""
+        """Remove arquivos PDF que seguem o padrão 'SEI_XXXXX' ou começam com 17 números"""
         diretorio = self.diretorio_selecionado.get()
-        padrao = re.compile(r"SEI_\d+\.\d+_\d+_\d+.*\.pdf$", re.IGNORECASE)
+        padrao_sei = re.compile(r"SEI_\d+\.\d+_\d+_\d+.*\.pdf$", re.IGNORECASE)
+        padrao_17digitos = re.compile(r"^\d{17}.*\.pdf$", re.IGNORECASE)
         removidos = 0
         
-        self.atualizar_status("Removendo arquivos SEI...")
+        self.atualizar_status("Removendo arquivos SEI e arquivos com 17 dígitos iniciais...")
         
         for root, _, arquivos in os.walk(diretorio):
             for arquivo in arquivos:
-                if padrao.search(arquivo):
+                if padrao_sei.search(arquivo) or padrao_17digitos.search(arquivo):
                     try:
                         caminho_completo = os.path.join(root, arquivo)
                         os.remove(caminho_completo)
@@ -102,8 +104,29 @@ class OrganizadorRepositorio:
                     except Exception as e:
                         self.atualizar_status(f"Erro ao remover {arquivo}: {str(e)}")
         
-        messagebox.showinfo("Concluído", f"{removidos} arquivos SEI foram removidos.")
-        self.atualizar_status(f"Concluído: {removidos} arquivos SEI removidos.")
+        messagebox.showinfo("Concluído", f"{removidos} arquivos SEI e arquivos com 17 dígitos foram removidos.")
+        self.atualizar_status(f"Concluído: {removidos} arquivos SEI e arquivos com 17 dígitos removidos.")
+    
+    def remover_arquivos_docx(self):
+        """Remove todos os arquivos .docx do diretório e suas subpastas"""
+        diretorio = self.diretorio_selecionado.get()
+        removidos = 0
+        
+        self.atualizar_status("Removendo arquivos .docx...")
+        
+        for root, _, arquivos in os.walk(diretorio):
+            for arquivo in arquivos:
+                if arquivo.lower().endswith(".docx"):
+                    try:
+                        caminho_completo = os.path.join(root, arquivo)
+                        os.remove(caminho_completo)
+                        removidos += 1
+                        self.atualizar_status(f"Removido: {arquivo}")
+                    except Exception as e:
+                        self.atualizar_status(f"Erro ao remover {arquivo}: {str(e)}")
+        
+        messagebox.showinfo("Concluído", f"{removidos} arquivos .docx foram removidos.")
+        self.atualizar_status(f"Concluído: {removidos} arquivos .docx removidos.")
     
     def remover_checklist_ocupante(self):
         """Remove arquivos que contêm 'ChecklistOcupante_' no nome"""
@@ -255,6 +278,9 @@ class OrganizadorRepositorio:
         # Expressão de backup para casos mais difíceis
         padrao_backup = re.compile(r"L(\d+)(?:e\d+)*(?:_\d+)?_(?:ParecerConclusivo|Relatorio).*_?PA?([A-Za-z]+).*\.pdf$", re.IGNORECASE)
         
+        # Novo padrão para arquivos que começam com número + _ParecerConclusivo (sem o L no início)
+        padrao_numero_inicial = re.compile(r"^(\d+)_(?:ParecerConclusivo(?:Ocupante)?|Relatorio)(?:_.+)?\.pdf$", re.IGNORECASE)
+        
         # Casos especiais que precisamos tratar individualmente - usando apenas parte do nome para ser mais flexível
         casos_especiais = {
             "L149_ParecerConclusivo_PAEDUARDORADUAN": {"lote": "149", "pa": "EDUARDORADUAN"}
@@ -271,21 +297,32 @@ class OrganizadorRepositorio:
                 if not arquivo.lower().endswith(".pdf"):
                     continue
                 
-                # Exibir informações de debug para cada arquivo PDF que começa com L
-                if arquivo.startswith("L"):
-                    self.atualizar_status(f"Analisando arquivo: {arquivo}")
+                # Variáveis para armazenar o lote e nome do PA
+                num_lote = None
+                nome_pa = None
                     
-                    # Verificar se o arquivo corresponde a algum caso especial (verificação parcial)
-                    caso_especial_encontrado = False
-                    for caso, valores in casos_especiais.items():
-                        if caso in arquivo:
-                            self.atualizar_status(f"Caso especial encontrado: {caso} em {arquivo}")
-                            num_lote = valores["lote"]
-                            nome_pa = valores["pa"]
-                            caso_especial_encontrado = True
-                            break
-                            
-                    if not caso_especial_encontrado:
+                # Exibir informações de debug para cada arquivo PDF
+                self.atualizar_status(f"Analisando arquivo: {arquivo}")
+                
+                # Verificar se o arquivo corresponde a algum caso especial (verificação parcial)
+                caso_especial_encontrado = False
+                for caso, valores in casos_especiais.items():
+                    if caso in arquivo:
+                        self.atualizar_status(f"Caso especial encontrado: {caso} em {arquivo}")
+                        num_lote = valores["lote"]
+                        nome_pa = valores["pa"]
+                        caso_especial_encontrado = True
+                        break
+                        
+                if not caso_especial_encontrado:
+                    # Verificar o novo padrão (número no início)
+                    match_numero = padrao_numero_inicial.search(arquivo)
+                    if match_numero:
+                        num_lote = match_numero.group(1)
+                        nome_pa = "DESCONHECIDO"  # Neste caso não temos PA no nome
+                        self.atualizar_status(f"Padrão de número inicial corresponde: {arquivo}, Lote={num_lote}")
+                    # Se não for o novo padrão, tentar os padrões existentes para arquivos começando com L
+                    elif arquivo.startswith("L"):
                         # Tentar fazer a correspondência com a expressão regular principal
                         match = padrao_parecer.search(arquivo)
                         if match:
@@ -304,131 +341,134 @@ class OrganizadorRepositorio:
                                 # Para debug, vamos mostrar o que os padrões estão tentando capturar
                                 self.atualizar_status(f"Debug - Tentando: {padrao_parecer.pattern} ou {padrao_backup.pattern}")
                                 continue
+                    else:
+                        self.atualizar_status(f"⚠️ Arquivo PDF não corresponde a nenhum padrão: {arquivo}")
+                        continue
+                
+                # Debug - mostrar o que foi capturado
+                self.atualizar_status(f"Capturado: Lote={num_lote}, PA={nome_pa} do arquivo {arquivo}")
+                
+                # Padronizar número do lote (ex: 3 -> Lote0003, 091 -> Lote0091, 032 -> Lote0032)
+                lote_formatado = f"Lote{int(num_lote):04d}"
+                
+                # Buscar pasta destino
+                caminho_origem = os.path.join(root, arquivo)
+                pasta_destino = None
+                
+                # Listar todas as pastas encontradas para diagnóstico
+                pastas_encontradas = []
+                
+                # Tentar encontrar pasta com base no nome PA (mais flexível com case-insensitive)
+                for raiz, _, _ in os.walk(diretorio):
+                    nome_pa_lower = nome_pa.lower()
+                    raiz_lower = raiz.lower()
                     
-                    # Debug - mostrar o que foi capturado
-                    self.atualizar_status(f"Capturado: Lote={num_lote}, PA={nome_pa} do arquivo {arquivo}")
+                    # Registrar todas as pastas que contêm o lote
+                    if lote_formatado.lower() in raiz_lower:
+                        pastas_encontradas.append(raiz)
                     
-                    # Padronizar número do lote (ex: 3 -> Lote0003, 091 -> Lote0091, 032 -> Lote0032)
-                    lote_formatado = f"Lote{int(num_lote):04d}"
-                    
-                    # Buscar pasta destino
-                    caminho_origem = os.path.join(root, arquivo)
-                    pasta_destino = None
-                    
-                    # Listar todas as pastas encontradas para diagnóstico
-                    pastas_encontradas = []
-                    
-                    # Tentar encontrar pasta com base no nome PA (mais flexível com case-insensitive)
-                    for raiz, _, _ in os.walk(diretorio):
-                        nome_pa_lower = nome_pa.lower()
-                        raiz_lower = raiz.lower()
+                    # Verificar se o nome do PA está na pasta e se a pasta contém o lote
+                    if nome_pa_lower in raiz_lower and "lote" in raiz_lower and lote_formatado.lower() in raiz_lower:
+                        pasta_destino = raiz
+                        self.atualizar_status(f"Pasta encontrada: {raiz}")
+                        break
+                
+                if not pasta_destino and pastas_encontradas:
+                    # Se não encontrou pasta com PA+lote, mas encontrou pastas com o lote,
+                    # use a primeira pasta do lote encontrada
+                    pasta_destino = pastas_encontradas[0]
+                    self.atualizar_status(f"Usando pasta alternativa: {pasta_destino}")
+                
+                if pasta_destino:
+                    try:
+                        caminho_origem = os.path.join(root, arquivo)
+                        caminho_destino = os.path.join(pasta_destino, arquivo)
                         
-                        # Registrar todas as pastas que contêm o lote
-                        if lote_formatado.lower() in raiz_lower:
-                            pastas_encontradas.append(raiz)
-                        
-                        # Verificar se o nome do PA está na pasta e se a pasta contém o lote
-                        if nome_pa_lower in raiz_lower and "lote" in raiz_lower and lote_formatado.lower() in raiz_lower:
-                            pasta_destino = raiz
-                            self.atualizar_status(f"Pasta encontrada: {raiz}")
-                            break
-                    
-                    if not pasta_destino and pastas_encontradas:
-                        # Se não encontrou pasta com PA+lote, mas encontrou pastas com o lote,
-                        # use a primeira pasta do lote encontrada
-                        pasta_destino = pastas_encontradas[0]
-                        self.atualizar_status(f"Usando pasta alternativa: {pasta_destino}")
-                    
-                    if pasta_destino:
-                        try:
-                            caminho_origem = os.path.join(root, arquivo)
-                            caminho_destino = os.path.join(pasta_destino, arquivo)
+                        # Verificar se o arquivo já existe no destino
+                        if os.path.exists(caminho_destino):
+                            self.atualizar_status(f"Arquivo já existe no destino: {caminho_destino}")
                             
-                            # Verificar se o arquivo já existe no destino
-                            if os.path.exists(caminho_destino):
-                                self.atualizar_status(f"Arquivo já existe no destino: {caminho_destino}")
+                            # Comparar as datas de modificação
+                            data_origem = os.path.getmtime(caminho_origem)
+                            data_destino = os.path.getmtime(caminho_destino)
+                            
+                            nome_base, extensao = os.path.splitext(arquivo)
+                            
+                            # Se o arquivo de destino é mais recente, renomeá-lo com "_2" antes da extensão
+                            if data_destino > data_origem:
+                                # Renomear o arquivo de destino (mais recente) para incluir _2
+                                novo_nome = f"{nome_base}_2{extensao}"
+                                novo_caminho_destino = os.path.join(pasta_destino, novo_nome)
                                 
-                                # Comparar as datas de modificação
-                                data_origem = os.path.getmtime(caminho_origem)
-                                data_destino = os.path.getmtime(caminho_destino)
+                                self.atualizar_status(f"Arquivo no destino é mais recente. Renomeando destino para: {novo_nome}")
                                 
-                                nome_base, extensao = os.path.splitext(arquivo)
+                                # Verificar se o novo nome também já existe
+                                if os.path.exists(novo_caminho_destino):
+                                    self.atualizar_status(f"O nome {novo_nome} já está em uso na pasta de destino.")
+                                    i = 3
+                                    while True:
+                                        novo_nome = f"{nome_base}_{i}{extensao}"
+                                        novo_caminho_destino = os.path.join(pasta_destino, novo_nome)
+                                        if not os.path.exists(novo_caminho_destino):
+                                            break
+                                        i += 1
+                                    self.atualizar_status(f"Usando nome alternativo: {novo_nome}")
                                 
-                                # Se o arquivo de destino é mais recente, renomeá-lo com "_2" antes da extensão
-                                if data_destino > data_origem:
-                                    # Renomear o arquivo de destino (mais recente) para incluir _2
-                                    novo_nome = f"{nome_base}_2{extensao}"
-                                    novo_caminho_destino = os.path.join(pasta_destino, novo_nome)
+                                # Renomear o arquivo de destino
+                                try:
+                                    os.rename(caminho_destino, novo_caminho_destino)
+                                    self.atualizar_status(f"Arquivo no destino renomeado para: {novo_nome}")
                                     
-                                    self.atualizar_status(f"Arquivo no destino é mais recente. Renomeando destino para: {novo_nome}")
-                                    
-                                    # Verificar se o novo nome também já existe
-                                    if os.path.exists(novo_caminho_destino):
-                                        self.atualizar_status(f"O nome {novo_nome} já está em uso na pasta de destino.")
-                                        i = 3
-                                        while True:
-                                            novo_nome = f"{nome_base}_{i}{extensao}"
-                                            novo_caminho_destino = os.path.join(pasta_destino, novo_nome)
-                                            if not os.path.exists(novo_caminho_destino):
-                                                break
-                                            i += 1
-                                        self.atualizar_status(f"Usando nome alternativo: {novo_nome}")
-                                    
-                                    # Renomear o arquivo de destino
-                                    try:
-                                        os.rename(caminho_destino, novo_caminho_destino)
-                                        self.atualizar_status(f"Arquivo no destino renomeado para: {novo_nome}")
-                                        
-                                        # Agora mover o arquivo original
-                                        shutil.copy2(caminho_origem, caminho_destino)
-                                        os.remove(caminho_origem)
-                                        movidos += 1
-                                        self.atualizar_status(f"Arquivo original (mais antigo) movido para: {caminho_destino}")
-                                    except Exception as e:
-                                        self.atualizar_status(f"Erro ao renomear arquivo no destino: {str(e)}")
-                                        nao_movidos += 1
-                                else:
-                                    # Se o arquivo da origem é mais recente, renomeá-lo com "_2" antes da extensão
-                                    novo_nome = f"{nome_base}_2{extensao}"
-                                    novo_caminho_destino = os.path.join(pasta_destino, novo_nome)
-                                    
-                                    self.atualizar_status(f"Arquivo de origem é mais recente. Renomeando origem para: {novo_nome}")
-                                    
-                                    # Verificar se o novo nome também já existe
-                                    if os.path.exists(novo_caminho_destino):
-                                        self.atualizar_status(f"O arquivo renomeado já existe: {novo_nome}")
-                                        i = 3
-                                        while True:
-                                            novo_nome = f"{nome_base}_{i}{extensao}"
-                                            novo_caminho_destino = os.path.join(pasta_destino, novo_nome)
-                                            if not os.path.exists(novo_caminho_destino):
-                                                break
-                                            i += 1
-                                        self.atualizar_status(f"Usando nome alternativo: {novo_nome}")
-                                    
-                                    shutil.copy2(caminho_origem, novo_caminho_destino)
+                                    # Agora mover o arquivo original
+                                    shutil.copy2(caminho_origem, caminho_destino)
                                     os.remove(caminho_origem)
                                     movidos += 1
-                                    self.atualizar_status(f"Movido com novo nome: {novo_nome}")
-                                continue
+                                    self.atualizar_status(f"Arquivo original (mais antigo) movido para: {caminho_destino}")
+                                except Exception as e:
+                                    self.atualizar_status(f"Erro ao renomear arquivo no destino: {str(e)}")
+                                    nao_movidos += 1
+                            else:
+                                # Se o arquivo da origem é mais recente, renomeá-lo com "_2" antes da extensão
+                                novo_nome = f"{nome_base}_2{extensao}"
+                                novo_caminho_destino = os.path.join(pasta_destino, novo_nome)
                                 
-                            # Se não existe arquivo duplicado, move normalmente
-                            shutil.copy2(caminho_origem, caminho_destino)
-                            os.remove(caminho_origem)
-                            movidos += 1
-                            self.atualizar_status(f"Movido: {arquivo} para {pasta_destino}")
-                        except Exception as e:
-                            self.atualizar_status(f"Erro ao mover {arquivo}: {str(e)}")
-                            nao_movidos += 1
-                    else:
-                        if pastas_encontradas:
-                            self.atualizar_status(f"Pastas do lote {lote_formatado} encontradas, mas nenhuma corresponde ao PA {nome_pa}:")
-                            for pasta in pastas_encontradas:
-                                self.atualizar_status(f"  - {pasta}")
-                        else:
-                            self.atualizar_status(f"Nenhuma pasta encontrada para o lote {lote_formatado}")
-                        self.atualizar_status(f"Não foi encontrada pasta para o arquivo: {arquivo}")
+                                self.atualizar_status(f"Arquivo de origem é mais recente. Renomeando origem para: {novo_nome}")
+                                
+                                # Verificar se o novo nome também já existe
+                                if os.path.exists(novo_caminho_destino):
+                                    self.atualizar_status(f"O arquivo renomeado já existe: {novo_nome}")
+                                    i = 3
+                                    while True:
+                                        novo_nome = f"{nome_base}_{i}{extensao}"
+                                        novo_caminho_destino = os.path.join(pasta_destino, novo_nome)
+                                        if not os.path.exists(novo_caminho_destino):
+                                            break
+                                        i += 1
+                                    self.atualizar_status(f"Usando nome alternativo: {novo_nome}")
+                                
+                                shutil.copy2(caminho_origem, novo_caminho_destino)
+                                os.remove(caminho_origem)
+                                movidos += 1
+                                self.atualizar_status(f"Movido com novo nome: {novo_nome}")
+                            continue
+                            
+                        # Se não existe arquivo duplicado, move normalmente
+                        shutil.copy2(caminho_origem, caminho_destino)
+                        os.remove(caminho_origem)
+                        movidos += 1
+                        self.atualizar_status(f"Movido: {arquivo} para {pasta_destino}")
+                    except Exception as e:
+                        self.atualizar_status(f"Erro ao mover {arquivo}: {str(e)}")
                         nao_movidos += 1
+                else:
+                    if pastas_encontradas:
+                        self.atualizar_status(f"Pastas do lote {lote_formatado} encontradas, mas nenhuma corresponde ao PA {nome_pa}:")
+                        for pasta in pastas_encontradas:
+                            self.atualizar_status(f"  - {pasta}")
+                    else:
+                        self.atualizar_status(f"Nenhuma pasta encontrada para o lote {lote_formatado}")
+                    self.atualizar_status(f"Não foi encontrada pasta para o arquivo: {arquivo}")
+                    nao_movidos += 1
         
         messagebox.showinfo("Concluído", f"{movidos} arquivos PDF foram movidos. {nao_movidos} não puderam ser movidos.")
         self.atualizar_status(f"Concluído: {movidos} arquivos PDF movidos, {nao_movidos} não movidos.")
